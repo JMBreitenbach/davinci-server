@@ -1,0 +1,91 @@
+name: CI
+
+# Two tiers of validation that don't require real Pi/printer hardware:
+#
+#   lint-and-test   Fast x86 checks on every push -- shellcheck on the
+#                   install script, and the pytest suite against the
+#                   real Flask app (with a fake `minimover` standing in
+#                   for the printer -- see tests/conftest.py).
+#
+#   arm-emulation   Runs the same repo inside a QEMU-emulated ARM
+#                   container (both armv7 for older Pi/Zero/Banana Pi
+#                   boards and aarch64 for Pi 4/5), actually compiling
+#                   minimover from source and installing Flask on real
+#                   ARM userspace. This is the part that catches
+#                   "works on my x86 machine, breaks on the Pi" bugs.
+#
+# What's still NOT covered by CI, and needs the manual smoke test on
+# real hardware before a release (see scripts/smoke-test.sh and
+# TESTING.md): the udev rule matching the printer's actual USB vendor
+# ID, the comitup WiFi hotspot (needs a real WiFi radio in AP mode),
+# and the systemd service actually being invoked as PID 1 would.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Shellcheck install.sh
+        run: shellcheck install.sh
+
+      - name: Install test dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run pytest
+        run: pytest tests/ -v
+
+  arm-emulation:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: aarch64
+            distro: bullseye
+            label: "Raspberry Pi 4/5 (aarch64)"
+          - arch: armv7
+            distro: bullseye
+            label: "Banana Pi / older Pi (armv7)"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build + install on emulated ${{ matrix.label }}
+        uses: uraimo/run-on-arch-action@v2
+        with:
+          arch: ${{ matrix.arch }}
+          distro: ${{ matrix.distro }}
+          githubToken: ${{ github.token }}
+          install: |
+            apt-get update -y
+            apt-get install -y build-essential git python3 python3-pip python3-venv
+          run: |
+            set -euo pipefail
+
+            echo "== Building minimover from source (real compile on ${{ matrix.arch }}) =="
+            git clone --depth 1 https://github.com/reality-boy/miniMover.git /tmp/miniMover
+            make -C /tmp/miniMover/miniMoverConsole
+            test -x /tmp/miniMover/miniMoverConsole/minimover
+            echo "minimover built OK"
+
+            echo "== Installing Flask into a venv, same as install.sh =="
+            python3 -m venv /tmp/venv
+            /tmp/venv/bin/pip install --upgrade pip flask
+            /tmp/venv/bin/python3 -c "import flask; print('flask import OK:', flask.__version__ if hasattr(flask, \"__version__\") else \"unknown\")"
+
+            echo "== Byte-compiling server.py and drivers under the target Python =="
+            /tmp/venv/bin/python3 -m py_compile server.py printers/*.py
+            echo "py_compile OK on ${{ matrix.arch }}"
