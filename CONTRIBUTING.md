@@ -81,3 +81,11 @@ If your change touches `install.sh`, `scripts/smoke-test.sh` is worth
 running on real hardware if you have access — CI's ARM emulation can't
 exercise systemd, udev, or actual USB/WiFi hardware (see TESTING.md
 for exactly why).
+
+## License
+
+This project is licensed under the [PolyForm Noncommercial License
+1.0.0](LICENSE) — noncommercial use, modification, and redistribution
+are freely permitted; commercial use is not, without separate
+permission. By submitting a pull request, you agree your contribution
+is provided under these same terms.

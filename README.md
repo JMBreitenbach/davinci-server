@@ -190,6 +190,23 @@ rebuilds and reinstalls everything, including the auto-start service.
   stuck job.
 - **Logs:** `journalctl -u davinci-server -f`
 
+## License
+
+Licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE).
+In short: free to use, modify, and redistribute — including your own
+changes — for any noncommercial purpose (personal, hobby, educational,
+nonprofit, etc.). You may not use it, or a modified version of it,
+commercially — including selling it, selling access to it, selling
+pre-built units running it, or offering it as a paid service — without
+separate permission from the copyright holder. This is a summary, not
+a substitute for the [full license text](LICENSE).
+
+Note this isn't an OSI-approved "open source" license in the strict
+sense — the OSI/FSF definitions of open source specifically prohibit
+restricting commercial use. It is free and open to extend, study, and
+redistribute for noncommercial purposes, which is the deliberate
+tradeoff here.
+
 ## For developers
 
 Want to add a driver for another printer, or send a pull request? See
