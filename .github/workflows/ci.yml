@@ -71,7 +71,7 @@ jobs:
           githubToken: ${{ github.token }}
           install: |
             apt-get update -y
-            apt-get install -y --no-install-recommends build-essential git python3 python3-venv
+            apt-get install -y --no-install-recommends build-essential git python3 python3-venv python3-dev
           run: |
             set -euo pipefail
 
@@ -89,7 +89,16 @@ jobs:
             echo "== Installing Flask into a venv, same as install.sh =="
             python3 -m venv /tmp/venv
             /tmp/venv/bin/python3 -m ensurepip --upgrade
-            /tmp/venv/bin/python3 -m pip install --upgrade pip flask
+            # Upgrade pip in its own step, separate from installing flask:
+            # ensurepip's bundled pip on this bullseye/armv7 image is old
+            # enough that resolving flask's own dependencies (which now ship
+            # pyproject.toml/PEP 621 metadata) in the same resolver pass as
+            # pip's self-upgrade crashes (KeyError / IndexError deep in TOML
+            # parsing). Running the upgrade first, then installing flask as
+            # a separate invocation, means the second command runs under the
+            # already-upgraded, modern pip.
+            /tmp/venv/bin/python3 -m pip install --upgrade pip
+            /tmp/venv/bin/python3 -m pip install flask
             /tmp/venv/bin/python3 -c "import flask; print('flask import OK:', flask.__version__ if hasattr(flask, \"__version__\") else \"unknown\")"
 
             echo "== Byte-compiling server.py and drivers under the target Python =="
