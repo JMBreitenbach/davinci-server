@@ -162,21 +162,24 @@ jobs:
 
       - name: Set up QEMU user-mode emulation
         # pi-gen's own build-docker.sh (not our code) runs a literal
-        # `which qemu-arm` on the *host* runner before it even starts
+        # `which qemu-aarch64` on the *host* runner before it even starts
         # Docker, and does its own binfmt_misc registration a few lines
         # later -- see
-        # https://github.com/RPi-Distro/pi-gen/blob/master/build-docker.sh.
+        # https://github.com/RPi-Distro/pi-gen/blob/arm64/build-docker.sh
+        # (confirmed against the arm64 branch specifically, which we
+        # clone -- master's equivalent check looks for qemu-arm instead).
         # That check is written for an older Debian qemu-user-static
         # packaging convention: current Ubuntu (verified against noble's
-        # actual package file lists) only ships qemu-arm-static, no plain
-        # qemu-arm binary, so the check fails even with qemu-user-static
-        # installed. Symlinking one to the other satisfies pi-gen's check;
-        # qemu-user-static's own postinst still does the real binfmt_misc
-        # registration that makes the emulation actually work.
+        # actual package file lists) only ships the "-static"-suffixed
+        # binary (qemu-aarch64-static), not the plain name, so the check
+        # fails even with qemu-user-static installed. Symlinking satisfies
+        # pi-gen's check; qemu-user-static's own postinst still does the
+        # real binfmt_misc registration that makes the emulation actually
+        # work.
         run: |
           sudo apt-get update -y
           sudo apt-get install -y qemu-user-static
-          sudo ln -sf /usr/bin/qemu-arm-static /usr/bin/qemu-arm
+          sudo ln -sf /usr/bin/qemu-aarch64-static /usr/bin/qemu-aarch64
 
       - name: Build image (Docker, privileged -- see pi-gen/README.md)
         working-directory: pi-gen
