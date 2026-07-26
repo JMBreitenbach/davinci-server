@@ -77,6 +77,14 @@ jobs:
 
             echo "== Building minimover from source (real compile on ${{ matrix.arch }}) =="
             git clone --depth 1 https://github.com/reality-boy/miniMover.git /tmp/miniMover
+            # Strip -g (debug symbols) from the upstream Makefile's CPPFLAGS before
+            # building: the debug-info pass in cc1plus exhausts memory under QEMU
+            # user-mode emulation on this runner (status 139 / SIGSEGV), the same
+            # class of issue as the python3-pip postinst workaround below.  Patching
+            # only the -g flag here (rather than hardcoding the full CPPFLAGS on the
+            # make command line) means any other upstream flag changes are still
+            # picked up automatically.
+            sed -i '/^CPPFLAGS/s/ -g//' /tmp/miniMover/miniMoverConsole/Makefile
             make -C /tmp/miniMover/miniMoverConsole
             test -x /tmp/miniMover/miniMoverConsole/minimover
             echo "minimover built OK"
