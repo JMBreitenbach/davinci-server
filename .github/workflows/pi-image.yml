@@ -73,17 +73,25 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release list --repo "$GITHUB_REPOSITORY" --json tagName,createdAt,body --limit 100 \
-            --jq '[.[] | select(.tagName | startswith("pi-image-"))] | sort_by(.createdAt) | reverse | .[0] // empty' \
-            > /tmp/last.json
+          # gh release list's --json only supports a fixed field set (no
+          # "body") -- it can't return release notes. So: list to find the
+          # newest pi-image-* tag + its date, then a separate `gh release
+          # view` call to read that one release's body for the base date.
+          last="$(gh release list --repo "$GITHUB_REPOSITORY" --json tagName,createdAt --limit 100 \
+            --jq '[.[] | select(.tagName | startswith("pi-image-"))] | sort_by(.createdAt) | reverse | .[0] // empty')"
 
-          if [ -s /tmp/last.json ] && [ "$(cat /tmp/last.json)" != "" ]; then
-            echo "created_at=$(jq -r '.createdAt' /tmp/last.json)" >> "$GITHUB_OUTPUT"
-            echo "base_date=$(jq -r '.body' /tmp/last.json | grep -oP 'base-image-date: \K\S+' || true)" >> "$GITHUB_OUTPUT"
-          else
+          if [ -z "$last" ] || [ "$last" = "null" ]; then
             echo "created_at=" >> "$GITHUB_OUTPUT"
             echo "base_date=" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+
+          tag="$(echo "$last" | jq -r '.tagName')"
+          created="$(echo "$last" | jq -r '.createdAt')"
+          base_date="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json body --jq '.body' | grep -oP 'base-image-date: \K\S+' || true)"
+
+          echo "created_at=$created" >> "$GITHUB_OUTPUT"
+          echo "base_date=$base_date" >> "$GITHUB_OUTPUT"
 
       - name: Decide whether to build
         id: decide
