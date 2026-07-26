@@ -156,6 +156,13 @@ jobs:
           rsync -a --exclude='.git' --exclude='pi-gen' \
             davinci-server/ pi-gen/stage-davinci/00-davinci/files/davinci-server/
 
+      - name: Set up QEMU user-mode emulation
+        # Registers binfmt_misc handlers on the runner host so the kernel
+        # knows to hand ARM binaries off to qemu-arm-static -- pi-gen's
+        # Docker build needs this to chroot into an ARM rootfs. Without
+        # it, build-docker.sh fails with "qemu-arm not found".
+        uses: docker/setup-qemu-action@v3
+
       - name: Build image (Docker, privileged -- see pi-gen/README.md)
         working-directory: pi-gen
         run: ./build-docker.sh
