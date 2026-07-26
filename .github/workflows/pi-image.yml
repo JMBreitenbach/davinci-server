@@ -157,11 +157,22 @@ jobs:
             davinci-server/ pi-gen/stage-davinci/00-davinci/files/davinci-server/
 
       - name: Set up QEMU user-mode emulation
-        # Registers binfmt_misc handlers on the runner host so the kernel
-        # knows to hand ARM binaries off to qemu-arm-static -- pi-gen's
-        # Docker build needs this to chroot into an ARM rootfs. Without
-        # it, build-docker.sh fails with "qemu-arm not found".
-        uses: docker/setup-qemu-action@v3
+        # pi-gen's own build-docker.sh (not our code) runs a literal
+        # `which qemu-arm` on the *host* runner before it even starts
+        # Docker, and does its own binfmt_misc registration a few lines
+        # later -- see
+        # https://github.com/RPi-Distro/pi-gen/blob/master/build-docker.sh.
+        # That check is written for an older Debian qemu-user-static
+        # packaging convention: current Ubuntu (verified against noble's
+        # actual package file lists) only ships qemu-arm-static, no plain
+        # qemu-arm binary, so the check fails even with qemu-user-static
+        # installed. Symlinking one to the other satisfies pi-gen's check;
+        # qemu-user-static's own postinst still does the real binfmt_misc
+        # registration that makes the emulation actually work.
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y qemu-user-static
+          sudo ln -sf /usr/bin/qemu-arm-static /usr/bin/qemu-arm
 
       - name: Build image (Docker, privileged -- see pi-gen/README.md)
         working-directory: pi-gen
