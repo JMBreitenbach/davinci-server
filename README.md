@@ -84,6 +84,16 @@ for what needs setting up.
 
 ## Install
 
+**Raspberry Pi:** grab a pre-built image with davinci-server already
+installed from the [Releases page](../../releases) (look for the
+newest `pi-image-*` release), flash it with Raspberry Pi Imager, and
+skip straight to step 4 below. Use Imager's "Edit Settings" (gear
+icon) before writing to set your hostname/user/password/WiFi/SSH --
+the image ships with none of that baked in, same as a stock Raspberry
+Pi OS image. Only the 3 most recent image releases are kept; see
+[pi-gen/README.md](pi-gen/README.md) for how it's built. For any other
+board (Banana Pi, Armbian, etc.), use the manual steps below.
+
 1. Flash a Debian-based OS (Raspberry Pi OS Lite, Armbian, etc.) to
    your board and get it on your network / reachable over SSH.
 2. Connect the printer to the board via USB.

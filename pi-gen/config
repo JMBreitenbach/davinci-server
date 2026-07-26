@@ -1,0 +1,28 @@
+# pi-gen build config for the davinci-server pre-built image.
+#
+# This file is copied into a fresh clone of RPi-Distro/pi-gen by
+# .github/workflows/pi-image.yml -- it isn't meant to be run from
+# inside this repo directly. See pi-gen/README.md.
+
+IMG_NAME="davinci-server"
+# Raspberry Pi OS's current release codename as of 2026-07-25 (verified
+# live against downloads.raspberrypi.org's image feed while building
+# this workflow -- it had already moved on from Bookworm to Trixie by
+# then). Bump this when Raspberry Pi OS ships its next release, and
+# validate with a manual workflow_dispatch run before relying on the
+# scheduled build.
+RELEASE=trixie
+DEPLOY_COMPRESSION=none
+
+# Headless Lite build: stage0/1/2 are pi-gen's base OS stages, then our
+# own stage installs davinci-server. Deliberately skips stage3/4/5
+# (desktop environment, recommended apps, etc.) -- this image is
+# headless-only.
+STAGE_LIST="stage0 stage1 stage2 stage-davinci"
+
+# Leave the login user, password, hostname, WiFi, and SSH key entirely
+# unset here on purpose: buyers set all of that themselves through
+# Raspberry Pi Imager's "Edit Settings" (gear icon) before flashing,
+# exactly like a stock Raspberry Pi OS image. Baking a default
+# username/password into every image would ship the same known
+# credentials on every board.

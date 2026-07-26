@@ -1,0 +1,217 @@
+name: Build Raspberry Pi image
+
+# Builds a ready-to-flash Raspberry Pi OS Lite (64-bit) image with
+# davinci-server pre-installed -- see pi-gen/README.md for how the
+# pieces fit together, and install.sh's --image-build mode for what
+# actually runs inside the image. (Currently Trixie-based, per
+# pi-gen/config's RELEASE -- Raspberry Pi OS's current release codename
+# at the time this workflow was written; check that value is still
+# current if builds start failing after a Raspberry Pi OS release.)
+#
+# Runs on standard GitHub-hosted runners via pi-gen's own Docker-based
+# build (a privileged container handles the loop-device/chroot work).
+# No self-hosted runner or cloud VM -- this repo is public, so the
+# Actions minutes are free.
+#
+# Cadence: checked on a monthly cron, but the check job only lets the
+# build proceed if it's been at least ~55 days since the last image
+# release AND Raspberry Pi OS has published a newer Lite (64-bit) base
+# image since then. That approximates "check every ~60 days, only
+# build on a significant new release" without relying on cron's
+# calendar math for a 60-day interval. `workflow_dispatch` bypasses
+# both checks by default, for building on demand.
+#
+# Releases are tagged pi-image-YYYY-MM-DD; prune-old-releases keeps
+# only the 3 most recent.
+
+on:
+  schedule:
+    - cron: '0 4 1 * *' # 1st of every month, 04:00 UTC -- see cadence note above
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Build now, ignoring the cadence/new-release checks"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write # to create/prune releases
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.decide.outputs.should_build }}
+      base_image_url: ${{ steps.feed.outputs.url }}
+      base_image_date: ${{ steps.feed.outputs.date }}
+    steps:
+      - name: Look up latest Raspberry Pi OS Lite (64-bit) image
+        id: feed
+        run: |
+          # Recursive-descent match on name, rather than assuming which
+          # top-level category the entry is nested under -- verified
+          # against the live feed 2026-07-25, at which point it sits
+          # under the "Raspberry Pi OS (other)" group, not top-level.
+          # That grouping has shifted before (this image used to be its
+          # own top-level "Raspberry Pi OS Lite" entry with 32/64-bit
+          # subitems) and may again -- this query only depends on the
+          # leaf object's own fields, not its ancestry.
+          feed="$(curl -fsSL https://downloads.raspberrypi.org/os_list_imagingutility_v3.json)"
+          entry="$(echo "$feed" | jq -r '[.. | objects | select(has("name") and has("url") and has("release_date")) | select(.name == "Raspberry Pi OS Lite (64-bit)")] | sort_by(.release_date) | reverse | .[0] // empty')"
+          if [ -z "$entry" ] || [ "$entry" = "null" ]; then
+            echo "Could not find a 'Raspberry Pi OS Lite (64-bit)' entry in the image feed -- it may have been renamed" >&2
+            exit 1
+          fi
+          url="$(echo "$entry" | jq -r '.url')"
+          date="$(echo "$entry" | jq -r '.release_date')"
+          echo "Latest upstream base image: $date ($url)"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "date=$date" >> "$GITHUB_OUTPUT"
+
+      - name: Find our last image release
+        id: last
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release list --repo "$GITHUB_REPOSITORY" --json tagName,createdAt,body --limit 100 \
+            --jq '[.[] | select(.tagName | startswith("pi-image-"))] | sort_by(.createdAt) | reverse | .[0] // empty' \
+            > /tmp/last.json
+
+          if [ -s /tmp/last.json ] && [ "$(cat /tmp/last.json)" != "" ]; then
+            echo "created_at=$(jq -r '.createdAt' /tmp/last.json)" >> "$GITHUB_OUTPUT"
+            echo "base_date=$(jq -r '.body' /tmp/last.json | grep -oP 'base-image-date: \K\S+' || true)" >> "$GITHUB_OUTPUT"
+          else
+            echo "created_at=" >> "$GITHUB_OUTPUT"
+            echo "base_date=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Decide whether to build
+        id: decide
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.force }}" = "true" ]; then
+            echo "Forced build via workflow_dispatch"
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          last_created="${{ steps.last.outputs.created_at }}"
+          last_base_date="${{ steps.last.outputs.base_date }}"
+
+          if [ -z "$last_created" ]; then
+            echo "No previous pi-image release found -- building"
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          days_since=$(( ( $(date +%s) - $(date -d "$last_created" +%s) ) / 86400 ))
+          echo "Last image release: $last_created ($days_since days ago), base date $last_base_date"
+
+          if [ "$days_since" -lt 55 ]; then
+            echo "Under ~60-day cadence -- skipping"
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "$last_base_date" = "${{ steps.feed.outputs.date }}" ]; then
+            echo "No new upstream base image since last release -- skipping"
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Cadence elapsed and a new base image is available -- building"
+          echo "should_build=true" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: check
+    if: needs.check.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: davinci-server
+
+      - name: Clone pi-gen
+        # Deliberately not pinned to a release-codename branch: Raspberry
+        # Pi OS's current release has already moved on once since this
+        # workflow was written (Bookworm -> Trixie), and pi-gen's default
+        # branch is the one upstream keeps working for whatever the
+        # current release is. If a build fails after a Raspberry Pi OS
+        # release bump, check pi-gen/config's RELEASE value against
+        # what pi-gen's default branch actually supports.
+        run: git clone --depth 1 https://github.com/RPi-Distro/pi-gen.git
+
+      - name: Stage our custom pi-gen stage + config
+        run: |
+          cp -r davinci-server/pi-gen/stage-davinci pi-gen/stage-davinci
+          cp davinci-server/pi-gen/config pi-gen/config
+          mkdir -p pi-gen/stage-davinci/00-davinci/files
+          rsync -a --exclude='.git' --exclude='pi-gen' \
+            davinci-server/ pi-gen/stage-davinci/00-davinci/files/davinci-server/
+
+      - name: Build image (Docker, privileged -- see pi-gen/README.md)
+        working-directory: pi-gen
+        run: ./build-docker.sh
+
+      - name: Compress + checksum
+        working-directory: pi-gen/deploy
+        run: |
+          img="$(ls ./*.img)"
+          xz -T0 -6 "$img"
+          sha256sum "$(basename "$img").xz" > "$(basename "$img").xz.sha256"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pi-image
+          path: |
+            pi-gen/deploy/*.img.xz
+            pi-gen/deploy/*.img.xz.sha256
+          retention-days: 5
+
+  release:
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: pi-image
+          path: dist
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="pi-image-$(date +%Y-%m-%d)"
+          gh release create "$tag" dist/*.img.xz dist/*.img.xz.sha256 \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "davinci-server Pi image ($(date +%Y-%m-%d))" \
+            --notes "$(cat <<EOF
+          Pre-built Raspberry Pi OS Lite (64-bit) image with
+          davinci-server pre-installed.
+
+          Flash with Raspberry Pi Imager and use its "Edit Settings" (gear
+          icon) to set your hostname, user/password, WiFi, and SSH key
+          before writing -- this image ships with none of those baked in,
+          same as a stock Raspberry Pi OS image. See README.md for
+          first-boot and everyday-use instructions.
+
+          base-image-url: ${{ needs.check.outputs.base_image_url }}
+          base-image-date: ${{ needs.check.outputs.base_image_date }}
+          davinci-server commit: ${{ github.sha }}
+          EOF
+          )"
+
+  prune-old-releases:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Keep only the 3 most recent pi-image releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release list --repo "$GITHUB_REPOSITORY" --json tagName,createdAt --limit 100 \
+            --jq '[.[] | select(.tagName | startswith("pi-image-"))] | sort_by(.createdAt) | reverse | .[3:] | .[].tagName' \
+            | while read -r tag; do
+                echo "Deleting old release: $tag"
+                gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
+              done

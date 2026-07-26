@@ -12,7 +12,21 @@
 #
 set -euo pipefail
 
-DAVINCI_USER="${SUDO_USER:-$(whoami)}"
+# --image-build (or DAVINCI_IMAGE_BUILD=1) skips the steps that need a
+# live running system -- starting services and reloading udev -- because
+# neither exists inside a pi-gen chroot at build time. The rest of this
+# script (packages, minimover build, config/unit files, udev rule
+# install) is identical either way; those steps take effect on first
+# real boot instead. See pi-gen/stage-davinci for the caller.
+IMAGE_BUILD="${DAVINCI_IMAGE_BUILD:-0}"
+for arg in "$@"; do
+  case "$arg" in
+    --image-build) IMAGE_BUILD=1 ;;
+    *) echo "Unknown option: $arg (expected --image-build)"; exit 1 ;;
+  esac
+done
+
+DAVINCI_USER="${DAVINCI_USER:-${SUDO_USER:-$(whoami)}}"
 DAVINCI_HOME="$(eval echo "~$DAVINCI_USER")"
 INSTALL_DIR="/opt/davinci"
 CONFIG_DIR="/etc/davinci"
@@ -60,6 +74,11 @@ sudo python3 -m venv "$INSTALL_DIR/venv"
 sudo "$INSTALL_DIR/venv/bin/pip" install --upgrade pip flask
 
 mkdir -p "$UPLOAD_DIR" "$UPLOAD_DIR/.converted"
+# Not sudo-prefixed above: normally this script runs as the target
+# user, so plain mkdir already gets the right ownership. That's not
+# true under --image-build, where the whole script runs as root inside
+# a chroot -- so make ownership explicit either way.
+sudo chown -R "$DAVINCI_USER:$DAVINCI_USER" "$UPLOAD_DIR"
 
 # --- 4. Config file -------------------------------------------------------
 echo "-- Writing config to $CONFIG_DIR/config.env"
@@ -91,8 +110,12 @@ echo "   NOTE: the idVendor above (0483, STMicro) is a common default for"
 echo "   these boards but isn't confirmed for this exact printer. Check"
 echo "   yours with: udevadm info -a -n /dev/ttyACM0 | grep idVendor"
 echo "   and edit /etc/udev/rules.d/99-davinci.rules if it differs."
-sudo udevadm control --reload-rules
-sudo udevadm trigger
+if [ "$IMAGE_BUILD" = "1" ]; then
+  echo "   (--image-build: skipping udevadm reload/trigger -- no live udev in a chroot)"
+else
+  sudo udevadm control --reload-rules
+  sudo udevadm trigger
+fi
 
 sudo usermod -aG dialout "$DAVINCI_USER"
 
@@ -117,7 +140,12 @@ WantedBy=multi-user.target
 EOF
 
 sudo systemctl daemon-reload
-sudo systemctl enable --now davinci-server
+if [ "$IMAGE_BUILD" = "1" ]; then
+  echo "   (--image-build: enabling davinci-server for boot, not starting it now)"
+  sudo systemctl enable davinci-server
+else
+  sudo systemctl enable --now davinci-server
+fi
 
 # --- 7. WiFi provisioning (comitup) + mDNS hostname ----------------------
 #
@@ -133,8 +161,14 @@ echo "-- Configuring comitup (WiFi onboarding) and mDNS hostname"
 sudo tee /etc/comitup.conf > /dev/null <<EOF
 ap_name: $HOSTNAME_MDNS
 EOF
-sudo systemctl enable --now comitup
-sudo systemctl enable --now avahi-daemon
+if [ "$IMAGE_BUILD" = "1" ]; then
+  echo "   (--image-build: enabling comitup + avahi-daemon for boot, not starting now)"
+  sudo systemctl enable comitup
+  sudo systemctl enable avahi-daemon
+else
+  sudo systemctl enable --now comitup
+  sudo systemctl enable --now avahi-daemon
+fi
 
 # --- 8. davinci-reset command ----------------------------------------------
 #
