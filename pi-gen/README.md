@@ -55,6 +55,19 @@ a dedicated system account instead of a personal login user, but that
 changes install.sh's behavior for regular manual installs too, so
 it's deliberately out of scope here rather than folded in silently.
 
+## pi-gen's arm64 branch, not master
+
+pi-gen selects 32-bit vs 64-bit by **git branch**, not a `config`
+variable: `master` builds armhf, `arm64` builds aarch64 (`RELEASE` is
+the separate config variable for the Debian codename, e.g. `trixie`).
+The workflow clones `-b arm64` specifically -- cloning without `-b`
+gets `master`, i.e. a 32-bit image, silently the wrong architecture
+for what `config`/README here describe. `master` also currently hits
+an open upstream bug where the bundled Raspbian archive key's only
+self-signature uses SHA-1, which current GnuPG rejects, breaking
+armhf's debootstrap; `arm64` builds don't touch that key at all. See
+https://github.com/RPi-Distro/pi-gen/issues/862.
+
 ## Build/release automation
 
 `.github/workflows/pi-image.yml` builds via pi-gen's own

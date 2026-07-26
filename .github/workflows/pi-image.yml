@@ -139,14 +139,18 @@ jobs:
           path: davinci-server
 
       - name: Clone pi-gen
-        # Deliberately not pinned to a release-codename branch: Raspberry
-        # Pi OS's current release has already moved on once since this
-        # workflow was written (Bookworm -> Trixie), and pi-gen's default
-        # branch is the one upstream keeps working for whatever the
-        # current release is. If a build fails after a Raspberry Pi OS
-        # release bump, check pi-gen/config's RELEASE value against
-        # what pi-gen's default branch actually supports.
-        run: git clone --depth 1 https://github.com/RPi-Distro/pi-gen.git
+        # Pinned to the arm64 branch, NOT for the Debian release codename
+        # (that's what pi-gen/config's RELEASE variable is for) but for
+        # architecture: per pi-gen's own README, "32 bit images should be
+        # built from the master branch. 64 bit images should be built
+        # from the arm64 branch." We want a 64-bit image (see
+        # pi-gen/config), and master's default (32-bit/armhf) is also
+        # where an open upstream bug lives -- an SHA-1-only signature on
+        # the bundled Raspbian archive key that current GnuPG rejects,
+        # breaking armhf debootstrap specifically (arm64 only uses the
+        # separately-signed main Debian repo, unaffected). See
+        # https://github.com/RPi-Distro/pi-gen/issues/862.
+        run: git clone --depth 1 -b arm64 https://github.com/RPi-Distro/pi-gen.git
 
       - name: Stage our custom pi-gen stage + config
         run: |
